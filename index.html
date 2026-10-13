@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Adhan</title>
+<meta name="description" content="Horaires de prière, appel sonore, position GPS et boussole Qibla en direct.">
+<meta name="theme-color" content="#EDF0F6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0C1224" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Adhan">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one narrow column. Hero with next prayer and the sun's day arc, the six times, live Qibla compass, then settings. */
+:root {
+  --bg: #EDF0F6;
+  --surface: #F8F9FC;
+  --fg: #14213D;
+  --muted: #5B6783;
+  --line: #D5DAE6;
+  --accent: #2B4BA8;
+  --accent-fg: #FFFFFF;
+  --sun: #B97A0A;
+  --sun-soft: #F3E6C6;
+  --ok: #1E7F5C;
+  --danger: #B3392F;
+  --font-display: 'Amiri', 'Noto Naskh Arabic', 'Geeza Pro', 'Times New Roman', serif;
+  --font-body: 'Figtree', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C1224; --surface: #141C36; --fg: #E7EBF7; --muted: #9AA6C6; --line: #26304F;
+    --accent: #8CA6FF; --accent-fg: #0C1224; --sun: #F0B24B; --sun-soft: #33291A;
+    --ok: #5BD3A2; --danger: #FF8A7E; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C1224; --surface: #141C36; --fg: #E7EBF7; --muted: #9AA6C6; --line: #26304F;
+  --accent: #8CA6FF; --accent-fg: #0C1224; --sun: #F0B24B; --sun-soft: #33291A;
+  --ok: #5BD3A2; --danger: #FF8A7E; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-inline: max(16px, env(safe-area-inset-left), env(safe-area-inset-right));
+  padding-top: calc(20px + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+}
+.wrap { max-width: 520px; margin-inline: auto; display: grid; gap: 18px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { font-family: var(--font-display); font-size: 34px; line-height: 1; font-weight: 700; }
+.clock { font-size: 14px; color: var(--muted); }
+.place { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.place select { font-size: 18px; font-weight: 600; padding: 4px 8px 4px 0; border: 0; background-color: transparent; color: var(--fg); min-width: 0; flex: 1; }
+.pin { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--accent); }
+.hijri { color: var(--muted); font-size: 13px; }
+.msg { color: var(--muted); font-size: 13px; min-height: 1.2em; }
+.msg.err { color: var(--danger); }
+
+select, input[type="number"], input[type="text"] {
+  font: inherit; color: var(--fg); background-color: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0;
+}
+button { font: inherit; cursor: pointer; }
+
+.hero { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 20px 18px 18px; display: grid; gap: 14px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.next { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.next-ar { font-family: var(--font-display); font-size: 60px; line-height: 1.05; font-weight: 700; }
+.next-fr { font-size: 15px; color: var(--muted); }
+.next-right { text-align: right; }
+.next-time { font-size: 28px; font-weight: 500; }
+.count { font-size: 15px; color: var(--sun); font-weight: 500; }
+
+.arc { width: 100%; height: auto; display: block; }
+.arc .horizon { stroke: var(--line); stroke-width: 1.5; }
+.arc .curve { stroke: var(--sun); stroke-width: 2; fill: none; }
+.arc .fill { fill: var(--sun-soft); }
+.arc .dot { fill: var(--sun); stroke: var(--surface); stroke-width: 3; }
+.arc .dot.night { fill: var(--surface); stroke: var(--muted); stroke-width: 2; }
+.arc .lbl { fill: var(--muted); font-family: var(--font-display); font-size: 14px; text-anchor: middle; }
+.arc .lbl.is-next { fill: var(--fg); font-weight: 700; }
+.arc .mk { fill: var(--surface); stroke: var(--muted); stroke-width: 1.5; }
+.arc .mk.is-next { fill: var(--sun); stroke: var(--sun); }
+
+.arm { display: grid; gap: 8px; }
+.btn { border: 0; border-radius: 12px; padding: 14px 16px; font-weight: 600; font-size: 16px; background: var(--accent); color: var(--accent-fg); }
+.btn.on { background: transparent; color: var(--ok); border: 1.5px solid var(--ok); }
+.btn.quiet { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 9px 14px; font-size: 14px; }
+.hint { font-size: 13px; color: var(--muted); }
+
+.times { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+.times li { display: grid; grid-template-columns: 1fr auto 44px; align-items: center; gap: 8px; padding: 12px 8px 12px 18px; border-top: 1px solid var(--line); }
+.times li:first-child { border-top: 0; }
+.times li.past { color: var(--muted); }
+.times li.is-next { background: var(--sun-soft); }
+.nm { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.nm .ar { font-family: var(--font-display); font-size: 24px; font-weight: 700; line-height: 1.2; }
+.nm .fr { font-size: 14px; color: var(--muted); }
+.tag { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--sun); font-weight: 600; }
+.t { font-size: 20px; font-weight: 500; }
+.bell { width: 44px; height: 44px; display: grid; place-items: center; background: transparent; border: 0; border-radius: 10px; color: var(--accent); }
+.bell .slash { display: none; }
+.bell[aria-pressed="false"] { color: var(--muted); }
+.bell[aria-pressed="false"] .slash { display: block; }
+.noCall { width: 44px; text-align: center; color: var(--muted); font-size: 18px; }
+
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+summary { padding: 14px 16px; font-weight: 600; cursor: pointer; }
+.panel { padding: 4px 16px 16px; display: grid; gap: 14px; }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field > label, .lab { font-size: 13px; color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.offs { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+input[type="file"] { max-width: 100%; font: inherit; font-size: 13px; color: var(--muted); }
+.custom { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; gap: 10px; }
+
+.qibla { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: grid; gap: 12px; justify-items: center; text-align: center; }
+.qibla h2 { margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; justify-self: start; }
+.dial { width: min(100%, 260px); height: auto; display: block; }
+.dial .ring { fill: var(--bg); stroke: var(--line); stroke-width: 2; }
+.dial .tk { stroke: var(--muted); stroke-width: 1.5; }
+.dial .tk.big { stroke-width: 2.5; stroke: var(--fg); }
+.dial .n { fill: var(--muted); font-size: 13px; text-anchor: middle; font-weight: 600; font-family: var(--font-body); }
+.dial .n.north { fill: var(--danger); }
+.dial .qneedle { fill: var(--sun); }
+.dial .qbox { fill: var(--sun); }
+.dial .you { fill: var(--accent); }
+.dial.aligned .ring { stroke: var(--ok); stroke-width: 4; }
+.dial.aligned .qneedle, .dial.aligned .qbox { fill: var(--ok); }
+.q-deg { font-size: 28px; font-weight: 500; }
+.q-status { font-size: 15px; font-weight: 600; min-height: 1.5em; }
+.q-status.ok { color: var(--ok); }
+.q-txt { color: var(--muted); font-size: 13px; max-width: 36ch; }
+.foot { font-size: 12.5px; color: var(--muted); }
+.install { background: var(--sun-soft); border-radius: 14px; padding: 14px 16px; display: grid; gap: 8px; }
+
+.banner {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--sun); color: #1b1303;
+  display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
+}
+.banner strong { font-family: var(--font-display); font-size: 26px; line-height: 1.1; }
+.banner button { background: #1b1303; color: #fff; border: 0; border-radius: 10px; padding: 10px 18px; font-weight: 600; }
+[hidden] { display: none !important; }
+@media (max-width: 420px) { .next-ar { font-size: 52px; } .next-right { text-align: left; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div class="brand" lang="ar" dir="rtl">أذان</div>
+    <div class="clock mono" id="now" aria-label="Heure actuelle"></div>
+  </header>
+
+  <div>
+    <div class="place">
+      <label class="sr" for="city">Ville</label>
+      <select id="city"></select>
+      <button class="pin" id="locate" type="button" aria-label="Utiliser ma position GPS" title="Utiliser ma position GPS">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="7.5"/></svg>
+      </button>
+    </div>
+    <div class="hijri" id="hijri"></div>
+    <div class="msg" id="locMsg" role="status"></div>
+  </div>
+
+  <section class="custom" id="custom" hidden aria-label="Position personnalisée">
+    <div class="grid2">
+      <div class="field"><label for="lat">Latitude</label><input id="lat" type="number" step="0.0001" min="-66" max="66"></div>
+      <div class="field"><label for="lng">Longitude</label><input id="lng" type="number" step="0.0001" min="-180" max="180"></div>
+    </div>
+    <div class="field"><label for="tz">Fuseau horaire</label><input id="tz" type="text" placeholder="Europe/Paris"></div>
+    <div class="hint" id="customMsg"></div>
+  </section>
+
+  <section class="hero">
+    <div class="eyebrow" id="nextLabel">Prochaine prière</div>
+    <div class="next">
+      <div>
+        <div class="next-ar" id="nextAr" lang="ar" dir="rtl"></div>
+        <div class="next-fr" id="nextFr"></div>
+      </div>
+      <div class="next-right">
+        <div class="next-time mono" id="nextTime"></div>
+        <div class="count mono" id="count"></div>
+      </div>
+    </div>
+    <svg class="arc" id="arc" viewBox="0 0 400 190" role="img" aria-label="Course du soleil et horaires de prière de la journée"></svg>
+    <div class="arm">
+      <button class="btn" id="arm" type="button">Activer les appels</button>
+      <div class="hint" id="armHint"></div>
+    </div>
+  </section>
+
+  <ol class="times" id="list"></ol>
+
+  <section class="qibla" aria-label="Boussole de la Qibla">
+    <h2>Direction de la Qibla</h2>
+    <svg class="dial" id="dial" viewBox="0 0 200 200" aria-hidden="true">
+      <circle class="ring" cx="100" cy="100" r="92"></circle>
+      <g id="dialRot">
+        <g id="ticks"></g>
+        <text class="n north" x="100" y="38">N</text>
+        <text class="n" x="162" y="105">E</text>
+        <text class="n" x="100" y="172">S</text>
+        <text class="n" x="38" y="105">O</text>
+        <g id="qMark">
+          <path class="qneedle" d="M100 52 L107 100 L93 100 Z"></path>
+          <rect class="qbox" x="92" y="12" width="16" height="16" rx="2"></rect>
+        </g>
+      </g>
+      <path class="you" d="M92 4 L108 4 L100 18 Z"></path>
+      <circle cx="100" cy="100" r="4" fill="var(--fg)"></circle>
+    </svg>
+    <div class="q-deg mono" id="qDeg"></div>
+    <div class="q-status" id="qStatus" aria-live="polite"></div>
+    <button class="btn quiet" id="compassBtn" type="button">Activer la boussole</button>
+    <div class="q-txt" id="qTxt"></div>
+  </section>
+
+  <details>
+    <summary>Calcul des horaires</summary>
+    <div class="panel">
+      <div class="field"><label for="method">Méthode</label><select id="method"></select></div>
+      <div class="field">
+        <label for="asr">Asr</label>
+        <select id="asr">
+          <option value="1">Standard (ombre = 1 fois l'objet)</option>
+          <option value="2">Hanafite (ombre = 2 fois l'objet)</option>
+        </select>
+      </div>
+      <div>
+        <div class="lab" style="margin-bottom:6px">Décalage en minutes, pour s'aligner sur votre mosquée</div>
+        <div class="offs" id="offs"></div>
+      </div>
+    </div>
+  </details>
+
+  <details>
+    <summary>Son et notifications</summary>
+    <div class="panel">
+      <div class="field">
+        <label for="sound">Son de l'appel</label>
+        <select id="sound">
+          <option value="chime">Sonnerie douce (intégrée)</option>
+          <option value="custom">Mon fichier audio</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="file">Ajouter votre adhan (mp3, m4a, ogg, wav)</label>
+        <input id="file" type="file" accept="audio/*">
+        <div class="hint" id="fileName">Aucun fichier. Le fichier reste sur cet appareil.</div>
+      </div>
+      <div class="row">
+        <label class="lab" for="vol">Volume</label>
+        <input id="vol" type="range" min="0.1" max="1" step="0.05">
+      </div>
+      <label class="row" style="gap:8px"><input id="notify" type="checkbox"> <span class="lab">Notification à l'heure de la prière</span></label>
+      <label class="row" style="gap:8px"><input id="wake" type="checkbox"> <span class="lab">Garder l'écran allumé</span></label>
+      <div class="row"><button class="btn quiet" id="test" type="button">Tester l'appel</button></div>
+    </div>
+  </details>
+
+  <section class="install" id="install" hidden>
+    <strong>Installer l'app</strong>
+    <div class="hint" id="installText"></div>
+    <button class="btn quiet" id="installBtn" type="button" hidden>Installer sur cet appareil</button>
+  </section>
+
+  <p class="foot">Les horaires sont calculés sur l'appareil, sans connexion, à partir de votre position et de la méthode choisie. Comparez avec le calendrier de votre mosquée et ajustez les décalages si besoin. La boussole lit le nord magnétique : éloignez le téléphone des aimants et des métaux, et tenez-le à plat.</p>
+</main>
+
+<div class="banner" id="banner" hidden role="alert">
+  <strong id="bannerText"></strong>
+  <button type="button" id="stop">Arrêter</button>
+</div>
+
+<script>
+/*CALC-START*/
+var rad = Math.PI / 180;
+var sin = function (d) { return Math.sin(d * rad); };
+var cos = function (d) { return Math.cos(d * rad); };
+var tan = function (d) { return Math.tan(d * rad); };
+var asin = function (x) { return Math.asin(x) / rad; };
+var acos = function (x) { return Math.acos(x) / rad; };
+var atan2 = function (y, x) { return Math.atan2(y, x) / rad; };
+var acot = function (x) { return Math.atan(1 / x) / rad; };
+var mod = function (a, b) { return ((a % b) + b) % b; };
+
+var METHODS = {
+  uoif:  { label: 'UOIF, Musulmans de France (12° / 12°)', fajr: 12, isha: 12 },
+  mwl:   { label: 'Ligue islamique mondiale (18° / 17°)', fajr: 18, isha: 17 },
+  isna:  { label: 'ISNA, Amérique du Nord (15° / 15°)', fajr: 15, isha: 15 },
+  egypt: { label: 'Autorité égyptienne (19,5° / 17,5°)', fajr: 19.5, isha: 17.5 },
+  umm:   { label: 'Oumm al-Qora, La Mecque (18,5° / Isha +90 min)', fajr: 18.5, isha: 0, ishaMin: 90 }
+};
+
+function julian(y, m, d) {
+  if (m <= 2) { y -= 1; m += 12; }
+  var A = Math.floor(y / 100), B = 2 - A + Math.floor(A / 4);
+  return Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + d + B - 1524.5;
+}
+
+function sunPosition(jd) {
+  var D = jd - 2451545.0;
+  var g = mod(357.529 + 0.98560028 * D, 360);
+  var q = mod(280.459 + 0.98564736 * D, 360);
+  var L = mod(q + 1.915 * sin(g) + 0.020 * sin(2 * g), 360);
+  var e = 23.439 - 0.00000036 * D;
+  var RA = mod(atan2(cos(e) * sin(L), cos(L)) / 15, 24);
+  return { decl: asin(sin(e) * sin(L)), eqt: q / 15 - RA };
+}
+
+/* Heures locales (décimales) pour un jour et un lieu. tzOff = décalage UTC en heures. */
+function computeHours(y, m, d, lat, lng, tzOff, method, asrF) {
+  var jd = julian(y, m, d) - lng / 360;
+  var pos = function (t) { return sunPosition(jd + t); };
+  var mid = function (t) { return mod(12 - pos(t).eqt, 24); };
+  var angleT = function (ang, t, ccw) {
+    var p = pos(t);
+    var x = (-sin(ang) - sin(p.decl) * sin(lat)) / (cos(p.decl) * cos(lat));
+    if (x > 1 || x < -1) return NaN;
+    var h = acos(x) / 15, n = mid(t);
+    return ccw ? n - h : n + h;
+  };
+  var asrT = function (f, t) {
+    var p = pos(t);
+    return angleT(-acot(f + tan(Math.abs(lat - p.decl))), t, false);
+  };
+  var T = { fajr: 5 / 24, sunrise: 6 / 24, dhuhr: 12 / 24, asr: 13 / 24, sunset: 18 / 24, isha: 18 / 24 };
+  var H = {};
+  for (var i = 0; i < 2; i++) {
+    H = {
+      fajr: angleT(method.fajr, T.fajr, true),
+      sunrise: angleT(0.833, T.sunrise, true),
+      dhuhr: mid(T.dhuhr),
+      asr: asrT(asrF, T.asr),
+      sunset: angleT(0.833, T.sunset, false),
+      isha: method.ishaMin ? NaN : angleT(method.isha, T.isha, false)
+    };
+    for (var k in T) { if (isFinite(H[k])) T[k] = H[k] / 24; }
+  }
+  var shift = tzOff - lng / 15;
+  for (var key in H) { H[key] += shift; }
+  if (method.ishaMin) H.isha = H.sunset + method.ishaMin / 60;
+  /* Hautes latitudes : on borne Fajr et Isha à une part de la nuit. */
+  var night = mod(H.sunrise - H.sunset, 24);
+  var pf = method.fajr / 60 * night;
+  if (!isFinite(H.fajr) || mod(H.sunrise - H.fajr, 24) > pf) H.fajr = H.sunrise - pf;
+  if (!method.ishaMin) {
+    var pi = method.isha / 60 * night;
+    if (!isFinite(H.isha) || mod(H.isha - H.sunset, 24) > pi) H.isha = H.sunset + pi;
+  }
+  return { fajr: H.fajr, sunrise: H.sunrise, dhuhr: H.dhuhr, asr: H.asr, maghrib: H.sunset, isha: H.isha };
+}
+
+function tzOffset(tz, y, m, d) {
+  var dt = new Date(Date.UTC(y, m - 1, d, 12));
+  var parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(dt);
+  var o = {};
+  parts.forEach(function (p) { o[p.type] = +p.value; });
+  return (Date.UTC(o.year, o.month - 1, o.day, o.hour, o.minute, o.second) - dt.getTime()) / 3600000;
+}
+
+function qiblaBearing(lat, lng) {
+  var p2 = 21.4225, l2 = 39.8262, dl = l2 - lng;
+  return mod(atan2(sin(dl) * cos(p2), cos(lat) * sin(p2) - sin(lat) * cos(p2) * cos(dl)), 360);
+}
+
+/* Cap du haut du téléphone (degrés, sens horaire depuis le nord) à partir d'un événement d'orientation. */
+function headingFromEvent(e, absoluteStream) {
+  if (typeof e.webkitCompassHeading === 'number' && isFinite(e.webkitCompassHeading)) return mod(e.webkitCompassHeading, 360);
+  if ((e.absolute === true || absoluteStream) && typeof e.alpha === 'number') return mod(360 - e.alpha, 360);
+  return null;
+}
+/* Écart signé (-180..180) de la cible par rapport au cap : positif = tourner à droite. */
+function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360) - 180; }
+/*CALC-END*/
+
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  var PRAYERS = [
+    { id: 'fajr', fr: 'Fajr', ar: 'الفجر' },
+    { id: 'sunrise', fr: 'Chourouk', ar: 'الشروق', info: true },
+    { id: 'dhuhr', fr: 'Dhouhr', ar: 'الظهر' },
+    { id: 'asr', fr: 'Asr', ar: 'العصر' },
+    { id: 'maghrib', fr: 'Maghrib', ar: 'المغرب' },
+    { id: 'isha', fr: 'Isha', ar: 'العشاء' }
+  ];
+  var BYID = {};
+  PRAYERS.forEach(function (p) { BYID[p.id] = p; });
+
+  var CITIES = [
+    ['Paris', 48.8566, 2.3522, 'Europe/Paris'], ['Marseille', 43.2965, 5.3698, 'Europe/Paris'],
+    ['Lyon', 45.7640, 4.8357, 'Europe/Paris'], ['Toulouse', 43.6047, 1.4442, 'Europe/Paris'],
+    ['Nice', 43.7102, 7.2620, 'Europe/Paris'], ['Nantes', 47.2184, -1.5536, 'Europe/Paris'],
+    ['Strasbourg', 48.5734, 7.7521, 'Europe/Paris'], ['Montpellier', 43.6108, 3.8767, 'Europe/Paris'],
+    ['Bordeaux', 44.8378, -0.5792, 'Europe/Paris'], ['Lille', 50.6292, 3.0573, 'Europe/Paris'],
+    ['Rennes', 48.1173, -1.6778, 'Europe/Paris'], ['Reims', 49.2583, 4.0317, 'Europe/Paris'],
+    ['Le Havre', 49.4944, 0.1079, 'Europe/Paris'], ['Saint-Étienne', 45.4397, 4.3872, 'Europe/Paris'],
+    ['Toulon', 43.1242, 5.9280, 'Europe/Paris'], ['Grenoble', 45.1885, 5.7245, 'Europe/Paris'],
+    ['Dijon', 47.3220, 5.0415, 'Europe/Paris'], ['Angers', 47.4784, -0.5632, 'Europe/Paris'],
+    ['Nîmes', 43.8367, 4.3601, 'Europe/Paris'], ['Clermont-Ferrand', 45.7772, 3.0870, 'Europe/Paris'],
+    ['Bruxelles', 50.8503, 4.3517, 'Europe/Brussels'], ['Genève', 46.2044, 6.1432, 'Europe/Zurich'],
+    ['Montréal', 45.5017, -73.5673, 'America/Toronto'], ['Casablanca', 33.5731, -7.5898, 'Africa/Casablanca'],
+    ['Alger', 36.7538, 3.0588, 'Africa/Algiers'], ['Tunis', 36.8065, 10.1815, 'Africa/Tunis']
+  ];
+
+  var DEFAULTS = {
+    city: 'Paris', lat: 48.8566, lng: 2.3522, tz: 'Europe/Paris', gpsAt: 0,
+    method: 'uoif', asr: 1,
+    offsets: { fajr: 0, sunrise: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0 },
+    calls: { fajr: true, dhuhr: true, asr: true, maghrib: true, isha: true },
+    sound: 'chime', volume: 0.8, wake: false, notify: false
+  };
+  var KEY = 'adhan-app-v2';
+  var state = JSON.parse(JSON.stringify(DEFAULTS));
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (saved) {
+      Object.keys(saved).forEach(function (k) {
+        if (k === 'offsets' || k === 'calls') Object.assign(state[k], saved[k]); else state[k] = saved[k];
+      });
+    }
+  } catch (e) { /* storage unavailable */ }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } }
+
+  function validTz(tz) { try { new Intl.DateTimeFormat('fr-FR', { timeZone: tz }); return true; } catch (e) { return false; } }
+  if (!validTz(state.tz)) state.tz = 'Europe/Paris';
+  function deviceTz() { try { var z = Intl.DateTimeFormat().resolvedOptions().timeZone; return z && validTz(z) ? z : null; } catch (e) { return null; } }
+
+  /* ---------- Dates dans le fuseau choisi ---------- */
+  function partsAt(ms) {
+    var f = new Intl.DateTimeFormat('en-US', { timeZone: state.tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric' });
+    var o = {};
+    f.formatToParts(new Date(ms)).forEach(function (p) { o[p.type] = +p.value; });
+    return { y: o.year, m: o.month, d: o.day };
+  }
+  function addDay(p, n) {
+    var dt = new Date(Date.UTC(p.y, p.m - 1, p.d + n));
+    return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+  }
+  function dayEvents(p) {
+    var off = tzOffset(state.tz, p.y, p.m, p.d);
+    var H = computeHours(p.y, p.m, p.d, state.lat, state.lng, off, METHODS[state.method], +state.asr);
+    var base = Date.UTC(p.y, p.m - 1, p.d);
+    return PRAYERS.map(function (pr) {
+      var ms = base + (H[pr.id] - off) * 3600000;
+      ms = Math.round(ms / 60000) * 60000 + (+state.offsets[pr.id] || 0) * 60000;
+      return { id: pr.id, ms: ms };
+    });
+  }
+  var fmtTime = function (ms) {
+    return new Intl.DateTimeFormat('fr-FR', { timeZone: state.tz, hour: '2-digit', minute: '2-digit' }).format(new Date(ms));
+  };
+
+  /* ---------- Réglages ---------- */
+  var cityEl = $('city');
+  var og = document.createElement('option'); og.value = '__gps'; og.textContent = 'Ma position (GPS)'; cityEl.appendChild(og);
+  CITIES.forEach(function (c) { var o = document.createElement('option'); o.value = c[0]; o.textContent = c[0]; cityEl.appendChild(o); });
+  var oc = document.createElement('option'); oc.value = '__custom'; oc.textContent = 'Autre position…'; cityEl.appendChild(oc);
+
+  var methodEl = $('method');
+  Object.keys(METHODS).forEach(function (k) { var o = document.createElement('option'); o.value = k; o.textContent = METHODS[k].label; methodEl.appendChild(o); });
+
+  var offsBox = $('offs');
+  PRAYERS.forEach(function (p) {
+    var w = document.createElement('div'); w.className = 'field';
+    w.innerHTML = '<label for="off-' + p.id + '">' + p.fr + '</label><input id="off-' + p.id + '" type="number" min="-60" max="60" step="1" value="0">';
+    offsBox.appendChild(w);
+  });
+
+  function syncControls() {
+    cityEl.value = state.city;
+    if (cityEl.value !== state.city) cityEl.value = 'Paris';
+    $('custom').hidden = state.city !== '__custom';
+    $('lat').value = state.lat; $('lng').value = state.lng; $('tz').value = state.tz;
+    methodEl.value = state.method; $('asr').value = String(state.asr);
+    PRAYERS.forEach(function (p) { $('off-' + p.id).value = state.offsets[p.id] || 0; });
+    $('sound').value = state.sound; $('vol').value = state.volume;
+    $('wake').checked = !!state.wake; $('notify').checked = !!state.notify;
+  }
+
+  cityEl.addEventListener('change', function () {
+    var v = cityEl.value;
+    if (v === '__gps') { locate(); cityEl.value = state.city; return; }
+    if (v === '__custom') {
+      state.city = '__custom'; var z = deviceTz(); if (z) state.tz = z;
+    } else {
+      var c = CITIES.filter(function (x) { return x[0] === v; })[0];
+      state.city = c[0]; state.lat = c[1]; state.lng = c[2]; state.tz = c[3];
+    }
+    setLocMsg('', false); onLocationChange();
+  });
+  function readCustom() {
+    var la = parseFloat($('lat').value), ln = parseFloat($('lng').value), tz = $('tz').value.trim();
+    var msg = $('customMsg');
+    if (!(la >= -66 && la <= 66) || !(ln >= -180 && ln <= 180)) { msg.textContent = 'Latitude entre -66 et 66, longitude entre -180 et 180.'; return; }
+    if (!validTz(tz)) { msg.textContent = 'Fuseau horaire inconnu. Exemple : Europe/Paris.'; return; }
+    msg.textContent = '';
+    state.lat = la; state.lng = ln; state.tz = tz; onLocationChange();
+  }
+  ['lat', 'lng', 'tz'].forEach(function (id) { $(id).addEventListener('change', readCustom); });
+  methodEl.addEventListener('change', function () { state.method = methodEl.value; recompute(); save(); });
+  $('asr').addEventListener('change', function () { state.asr = +$('asr').value; recompute(); save(); });
+  PRAYERS.forEach(function (p) {
+    $('off-' + p.id).addEventListener('change', function () {
+      var v = parseInt($('off-' + p.id).value, 10); if (isNaN(v)) v = 0;
+      state.offsets[p.id] = Math.max(-60, Math.min(60, v)); recompute(); save();
+    });
+  });
+  $('vol').addEventListener('input', function () { state.volume = +$('vol').value; if (audioEl) audioEl.volume = state.volume; save(); });
+  $('sound').addEventListener('change', function () { state.sound = $('sound').value; save(); });
+
+  /* ---------- Position GPS ---------- */
+  function setLocMsg(t, err) { var m = $('locMsg'); m.textContent = t; m.classList.toggle('err', !!err); }
+  var locating = false;
+  function locate(silent) {
+    if (!navigator.geolocation) { setLocMsg("La géolocalisation n'est pas disponible sur cet appareil.", true); return; }
+    if (locating) return;
+    locating = true;
+    if (!silent) setLocMsg('Recherche de votre position…', false);
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      locating = false;
+      state.city = '__gps';
+      state.lat = Math.round(pos.coords.latitude * 10000) / 10000;
+      state.lng = Math.round(pos.coords.longitude * 10000) / 10000;
+      var z = deviceTz(); if (z) state.tz = z;
+      state.gpsAt = Date.now();
+      onLocationChange();
+    }, function (err) {
+      locating = false;
+      var m = err.code === 1 ? "Localisation refusée. Autorisez-la pour ce site dans les réglages du navigateur, puis réessayez."
+        : err.code === 3 ? 'La position a pris trop de temps. Réessayez à l\'extérieur ou avec le Wi-Fi activé.'
+        : 'Position introuvable. Choisissez une ville dans la liste.';
+      if (!silent || err.code === 1) setLocMsg(m, true);
+    }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 });
+  }
+  $('locate').addEventListener('click', function () { locate(false); });
+  function gpsLabel() {
+    if (state.city !== '__gps') return;
+    var t = new Intl.DateTimeFormat('fr-FR', { timeZone: state.tz, hour: '2-digit', minute: '2-digit' }).format(new Date(state.gpsAt || Date.now()));
+    setLocMsg('Position GPS relevée à ' + t + ' · ' + state.lat.toFixed(2) + '°, ' + state.lng.toFixed(2) + '°', false);
+  }
+  function refreshGpsIfGranted() {
+    if (state.city !== '__gps' || !navigator.permissions || !navigator.permissions.query) return;
+    if (Date.now() - (state.gpsAt || 0) < 30 * 60000) return;
+    navigator.permissions.query({ name: 'geolocation' }).then(function (r) { if (r.state === 'granted') locate(true); }).catch(function () { /* unsupported */ });
+  }
+
+  /* ---------- Calcul du jour et affichage ---------- */
+  var today = null, tomorrow = null, dayKey = '', fired = {};
+
+  function onLocationChange() { syncControls(); gpsLabel(); drawQibla(); recompute(); drawHijri(); save(); }
+
+  function recompute() {
+    var p = partsAt(Date.now());
+    dayKey = p.y + '-' + p.m + '-' + p.d;
+    today = dayEvents(p); tomorrow = dayEvents(addDay(p, 1));
+    renderList(); drawArcStatic(); lastNextId = ''; tick();
+    scheduleNext();
+  }
+
+  var bellSvg = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7"/><path d="M10 20a2 2 0 0 0 4 0"/><path class="slash" d="M4 4l16 16"/></svg>';
+  function renderList() {
+    var list = $('list'); list.innerHTML = '';
+    today.forEach(function (e) {
+      var pr = BYID[e.id], li = document.createElement('li'); li.dataset.id = e.id;
+      var right = pr.info
+        ? '<span class="noCall" title="Pas d\'appel pour le lever du soleil" aria-hidden="true">·</span>'
+        : '<button type="button" class="bell" data-id="' + e.id + '" aria-label="Appel ' + pr.fr + '" aria-pressed="' + (state.calls[e.id] ? 'true' : 'false') + '">' + bellSvg + '</button>';
+      li.innerHTML = '<div class="nm"><span class="ar" lang="ar" dir="rtl">' + pr.ar + '</span><span class="fr">' + pr.fr + (pr.info ? ' · lever du soleil' : '') + '</span><span class="tag" hidden>Prochaine</span></div>' +
+        '<span class="t mono">' + fmtTime(e.ms) + '</span>' + right;
+      list.appendChild(li);
+    });
+    Array.prototype.forEach.call(list.querySelectorAll('.bell'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.dataset.id; state.calls[id] = !state.calls[id];
+        b.setAttribute('aria-pressed', state.calls[id] ? 'true' : 'false'); save(); scheduleNext();
+      });
+    });
+  }
+
+  var ARC = { X0: 22, X1: 378, HY: 128, H: 88 };
+  var arcInfo = null;
+  function drawArcStatic() {
+    var ev = {}; today.forEach(function (e) { ev[e.id] = e.ms; });
+    var t0 = ev.fajr - 20 * 60000, t1 = ev.isha + 20 * 60000;
+    var sr = ev.sunrise - (+state.offsets.sunrise || 0) * 60000;
+    var ss = ev.maghrib - (+state.offsets.maghrib || 0) * 60000;
+    var xOf = function (t) { return ARC.X0 + (t - t0) / (t1 - t0) * (ARC.X1 - ARC.X0); };
+    var yOf = function (t) { return ARC.HY - ARC.H * Math.sin(Math.PI * Math.min(1, Math.max(0, (t - sr) / (ss - sr)))); };
+    arcInfo = { t0: t0, t1: t1, sr: sr, ss: ss, xOf: xOf, yOf: yOf };
+    var pts = [], i;
+    for (i = 0; i <= 48; i++) { var t = sr + (ss - sr) * i / 48; pts.push(xOf(t).toFixed(1) + ',' + yOf(t).toFixed(1)); }
+    var s = '<path class="fill" d="M' + pts[0] + ' L' + pts.join(' L') + ' Z"></path>';
+    s += '<line class="horizon" x1="' + ARC.X0 + '" y1="' + ARC.HY + '" x2="' + ARC.X1 + '" y2="' + ARC.HY + '"></line>';
+    s += '<polyline class="curve" points="' + pts.join(' ') + '"></polyline>';
+    var row = 0;
+    PRAYERS.forEach(function (p) {
+      var x = xOf(ev[p.id]), y = ARC.HY;
+      if (p.id === 'dhuhr' || p.id === 'asr') y = yOf(ev[p.id]);
+      s += '<circle class="mk" data-mk="' + p.id + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (p.info ? 3 : 5) + '"></circle>';
+      if (!p.info) {
+        var ly = ARC.HY + 22 + (row % 2) * 17; row++;
+        s += '<text class="lbl" data-lb="' + p.id + '" x="' + x.toFixed(1) + '" y="' + ly + '" lang="ar">' + p.ar + '</text>';
+      }
+    });
+    s += '<circle class="dot" id="sunDot" r="8" cx="-20" cy="' + ARC.HY + '"></circle>';
+    $('arc').innerHTML = s;
+  }
+
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtCount(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    return two(Math.floor(s / 3600)) + ':' + two(Math.floor(s % 3600 / 60)) + ':' + two(s % 60);
+  }
+
+  var lastNextId = '';
+  function tick() {
+    var now = Date.now(), p = partsAt(now);
+    if (p.y + '-' + p.m + '-' + p.d !== dayKey) { recompute(); return; }
+    $('now').textContent = new Intl.DateTimeFormat('fr-FR', { timeZone: state.tz, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(now));
+    var all = today.concat(tomorrow), next = null, i;
+    for (i = 0; i < all.length; i++) { if (all[i].ms > now) { next = all[i]; break; } }
+    if (next) {
+      var pr = BYID[next.id];
+      $('nextLabel').textContent = pr.info ? 'Prochain repère · lever du soleil' : 'Prochaine prière';
+      $('nextAr').textContent = pr.ar; $('nextFr').textContent = pr.fr;
+      $('nextTime').textContent = fmtTime(next.ms);
+      $('count').textContent = 'dans ' + fmtCount(next.ms - now);
+      var isToday = today.indexOf(next) !== -1;
+      var sig = next.id + (isToday ? 't' : 'm');
+      if (sig !== lastNextId) { lastNextId = sig; markNext(isToday ? next.id : null); }
+    }
+    Array.prototype.forEach.call($('list').children, function (li, idx) { li.classList.toggle('past', today[idx].ms <= now); });
+    if (arcInfo) {
+      var dot = $('sunDot');
+      if (dot) {
+        var inDay = now >= arcInfo.sr && now <= arcInfo.ss;
+        var cx = Math.min(ARC.X1, Math.max(ARC.X0, arcInfo.xOf(now)));
+        dot.setAttribute('cx', cx.toFixed(1));
+        dot.setAttribute('cy', (inDay ? arcInfo.yOf(now) : ARC.HY).toFixed(1));
+        dot.setAttribute('class', 'dot' + (inDay ? '' : ' night'));
+      }
+    }
+    if (armed) {
+      today.forEach(function (e) {
+        var pr = BYID[e.id];
+        if (pr.info || !state.calls[e.id]) return;
+        var key = dayKey + '-' + e.id;
+        if (now >= e.ms && now - e.ms < 180000 && !fired[key]) {
+          fired[key] = true; fireCall(pr.fr + ' · ' + fmtTime(e.ms), pr.ar);
+        }
+      });
+    }
+  }
+  function markNext(id) {
+    Array.prototype.forEach.call($('list').children, function (li) {
+      var on = li.dataset.id === id; li.classList.toggle('is-next', on);
+      li.querySelector('.tag').hidden = !on;
+    });
+    Array.prototype.forEach.call($('arc').querySelectorAll('[data-mk]'), function (c) { c.classList.toggle('is-next', c.getAttribute('data-mk') === id); });
+    Array.prototype.forEach.call($('arc').querySelectorAll('[data-lb]'), function (c) { c.classList.toggle('is-next', c.getAttribute('data-lb') === id); });
+  }
+
+  var timer = null;
+  function scheduleNext() {
+    clearTimeout(timer);
+    var now = Date.now(), best = null;
+    today.concat(tomorrow).forEach(function (e) {
+      if (BYID[e.id].info || !state.calls[e.id]) return;
+      if (e.ms > now && (best === null || e.ms < best)) best = e.ms;
+    });
+    if (best !== null) timer = setTimeout(tick, Math.min(best - now + 300, 2147000000));
+  }
+
+  /* ---------- Qibla et boussole ---------- */
+  var bearing = 0;
+  (function buildTicks() {
+    var s = '';
+    for (var a = 0; a < 360; a += 15) {
+      var big = a % 90 === 0, r1 = big ? 70 : 78, r2 = 86;
+      var x1 = 100 + r1 * Math.sin(a * rad), y1 = 100 - r1 * Math.cos(a * rad);
+      var x2 = 100 + r2 * Math.sin(a * rad), y2 = 100 - r2 * Math.cos(a * rad);
+      if (a === 0 || a === 90 || a === 180 || a === 270) continue;
+      s += '<line class="tk" x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '"></line>';
+    }
+    $('ticks').innerHTML = s;
+  })();
+
+  var comp = { on: false, sx: 0, sy: 0, heading: null, aligned: false, raf: 0, seen: false };
+  function renderCompass() {
+    comp.raf = 0;
+    var h = comp.heading;
+    $('dialRot').setAttribute('transform', 'rotate(' + (h === null ? 0 : -h).toFixed(1) + ' 100 100)');
+    $('qMark').setAttribute('transform', 'rotate(' + bearing.toFixed(1) + ' 100 100)');
+    var st = $('qStatus');
+    if (h === null) {
+      st.className = 'q-status';
+      st.textContent = comp.on ? 'Recherche du cap…' : 'Face au nord, tournez de ' + Math.round(bearing) + '° vers la droite.';
+      $('dial').classList.remove('aligned');
+      return;
+    }
+    var d = turnNeeded(bearing, h), ok = Math.abs(d) < 4;
+    $('dial').classList.toggle('aligned', ok);
+    st.className = 'q-status' + (ok ? ' ok' : '');
+    st.textContent = ok ? 'Qibla alignée' : 'Tournez de ' + Math.round(Math.abs(d)) + '° vers la ' + (d > 0 ? 'droite' : 'gauche');
+    if (ok && !comp.aligned && navigator.vibrate) { try { navigator.vibrate(40); } catch (e) { /* ignore */ } }
+    comp.aligned = ok;
+  }
+  function queueRender() { if (!comp.raf) comp.raf = requestAnimationFrame(renderCompass); }
+  function drawQibla() {
+    bearing = qiblaBearing(state.lat, state.lng);
+    var names = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest'];
+    $('qDeg').textContent = Math.round(bearing) + '° ' + names[Math.round(bearing / 45) % 8];
+    queueRender();
+  }
+
+  var oriName = ('ondeviceorientationabsolute' in window) ? 'deviceorientationabsolute' : 'deviceorientation';
+  function onOri(e) {
+    var h = headingFromEvent(e, oriName === 'deviceorientationabsolute');
+    if (h === null) return;
+    comp.seen = true;
+    var a = h * rad;
+    comp.sx = comp.sx * 0.82 + Math.cos(a) * 0.18;
+    comp.sy = comp.sy * 0.82 + Math.sin(a) * 0.18;
+    if (comp.heading === null) { comp.sx = Math.cos(a); comp.sy = Math.sin(a); }
+    comp.heading = mod(Math.atan2(comp.sy, comp.sx) / rad, 360);
+    queueRender();
+  }
+  function attachCompass() {
+    window.addEventListener(oriName, onOri, true);
+    comp.on = true; comp.heading = null; comp.seen = false;
+    $('compassBtn').textContent = 'Arrêter la boussole';
+    $('qTxt').textContent = 'Tenez le téléphone à plat, écran vers le haut. Si le cap dérive, dessinez un 8 avec le téléphone pour le calibrer.';
+    renderCompass();
+    setTimeout(function () {
+      if (comp.on && !comp.seen) {
+        $('qStatus').textContent = 'Aucun capteur de cap détecté sur cet appareil.';
+        $('qTxt').textContent = 'Utilisez la direction indiquée en degrés avec la boussole de votre téléphone.';
+      }
+    }, 2500);
+  }
+  function detachCompass() {
+    window.removeEventListener(oriName, onOri, true);
+    comp.on = false; comp.heading = null; comp.aligned = false;
+    $('compassBtn').textContent = 'Activer la boussole';
+    $('qTxt').textContent = '';
+    renderCompass();
+  }
+  $('compassBtn').addEventListener('click', function () {
+    if (comp.on) { detachCompass(); return; }
+    var D = window.DeviceOrientationEvent;
+    if (D && typeof D.requestPermission === 'function') {
+      D.requestPermission().then(function (r) {
+        if (r === 'granted') attachCompass();
+        else { $('qStatus').textContent = 'Accès à la boussole refusé.'; $('qTxt').textContent = 'Autorisez « Mouvement et orientation » pour ce site dans les réglages de Safari.'; }
+      }).catch(function () { $('qStatus').textContent = "Impossible d'activer la boussole."; });
+    } else if (window.DeviceOrientationEvent) {
+      attachCompass();
+    } else {
+      $('qStatus').textContent = 'Boussole indisponible sur cet appareil.';
+    }
+  });
+
+  /* ---------- Date hégirienne ---------- */
+  function drawHijri() {
+    try {
+      $('hijri').textContent = new Intl.DateTimeFormat('fr-FR-u-ca-islamic-umalqura', { timeZone: state.tz, day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+    } catch (e) { $('hijri').textContent = ''; }
+  }
+
+  /* ---------- Son, notifications ---------- */
+  var armed = false, ctx = null, active = [], audioEl = null, customUrl = null;
+  function getCtx() {
+    if (!ctx) { var C = window.AudioContext || window.webkitAudioContext; if (C) ctx = new C(); }
+    return ctx;
+  }
+  function stopSound() {
+    active.forEach(function (o) { try { o.stop(); } catch (e) { /* ended */ } });
+    active = [];
+    if (audioEl) { try { audioEl.pause(); audioEl.currentTime = 0; } catch (e) { /* ignore */ } }
+  }
+  function playChime() {
+    var c = getCtx(); if (!c) return;
+    if (c.resume) c.resume();
+    var master = c.createGain(); master.gain.value = state.volume * 0.45; master.connect(c.destination);
+    var notes = [392, 494, 587, 784], t = c.currentTime + 0.05;
+    for (var r = 0; r < 3; r++) {
+      notes.forEach(function (f) {
+        [[f, 1], [f * 2.01, 0.25]].forEach(function (pair) {
+          var o = c.createOscillator(), g = c.createGain();
+          o.type = 'sine'; o.frequency.value = pair[0];
+          g.gain.setValueAtTime(0.0001, t);
+          g.gain.linearRampToValueAtTime(pair[1], t + 0.03);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+          o.connect(g); g.connect(master); o.start(t); o.stop(t + 1.8); active.push(o);
+        });
+        t += 0.45;
+      });
+      t += 0.9;
+    }
+  }
+  function playSound() {
+    stopSound();
+    if (state.sound !== 'chime' && audioEl) {
+      audioEl.volume = state.volume; audioEl.currentTime = 0;
+      var pr = audioEl.play();
+      if (pr && pr.catch) pr.catch(function () { playChime(); });
+    } else { playChime(); }
+  }
+  var bannerTimer = null, baseTitle = document.title;
+  function notifyNow(label) {
+    if (!state.notify || !('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+    var opts = { body: "C'est l'heure de la prière.", icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'adhan', renotify: true, vibrate: [200, 100, 200] };
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+        navigator.serviceWorker.ready.then(function (r) { r.showNotification(label, opts); }).catch(function () { new Notification(label, opts); });
+      } else { new Notification(label, opts); }
+    } catch (e) { /* ignore */ }
+  }
+  function fireCall(label, ar) {
+    $('bannerText').textContent = (ar ? ar + ' · ' : '') + label;
+    $('banner').hidden = false;
+    try { document.title = label; } catch (e) { /* ignore */ }
+    playSound(); notifyNow(label);
+    clearTimeout(bannerTimer); bannerTimer = setTimeout(hideBanner, 5 * 60000);
+  }
+  function hideBanner() { $('banner').hidden = true; stopSound(); try { document.title = baseTitle; } catch (e) { /* ignore */ } }
+  $('stop').addEventListener('click', hideBanner);
+
+  function prime() {
+    var c = getCtx(); if (c && c.resume) c.resume();
+    if (audioEl) {
+      audioEl.muted = true;
+      var pr = audioEl.play();
+      var done = function () { try { audioEl.pause(); audioEl.currentTime = 0; audioEl.muted = false; } catch (e) { /* ignore */ } };
+      if (pr && pr.then) pr.then(done).catch(function () { audioEl.muted = false; }); else done();
+    }
+  }
+  function renderArm() {
+    var b = $('arm');
+    b.textContent = armed ? 'Appels activés · Désactiver' : 'Activer les appels';
+    b.classList.toggle('on', armed);
+    $('armHint').textContent = armed
+      ? 'Un appel retentira à chaque heure de prière dont la cloche est active. Gardez l\'app ouverte.'
+      : "Touchez ce bouton à chaque ouverture : le navigateur n'autorise le son qu'après un toucher.";
+  }
+  $('arm').addEventListener('click', function () {
+    armed = !armed; if (armed) prime(); else hideBanner();
+    renderArm(); scheduleNext();
+  });
+  $('test').addEventListener('click', function () { prime(); fireCall("Test de l'appel", 'أذان'); });
+
+  $('notify').addEventListener('change', function () {
+    var on = $('notify').checked;
+    if (on && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(function (r) { state.notify = r === 'granted'; $('notify').checked = state.notify; save(); });
+    } else if (on && (!('Notification' in window) || Notification.permission === 'denied')) {
+      state.notify = false; $('notify').checked = false; $('fileName').textContent = 'Notifications indisponibles ou bloquées pour ce site.';
+    } else { state.notify = on; save(); }
+  });
+
+  /* Fichier audio personnel, gardé dans IndexedDB */
+  function idb() {
+    return new Promise(function (res, rej) {
+      var r = indexedDB.open('adhan-app', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('files'); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error); };
+    });
+  }
+  function putFile(file) {
+    return idb().then(function (db) {
+      return new Promise(function (res, rej) {
+        var tx = db.transaction('files', 'readwrite');
+        tx.objectStore('files').put({ blob: file, name: file.name }, 'custom');
+        tx.oncomplete = res; tx.onerror = function () { rej(tx.error); };
+      });
+    });
+  }
+  function getFile() {
+    return idb().then(function (db) {
+      return new Promise(function (res, rej) {
+        var q = db.transaction('files').objectStore('files').get('custom');
+        q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); };
+      });
+    });
+  }
+  function useFile(blob, name, persisted) {
+    if (customUrl) URL.revokeObjectURL(customUrl);
+    customUrl = URL.createObjectURL(blob);
+    audioEl = new Audio(customUrl); audioEl.preload = 'auto'; audioEl.volume = state.volume;
+    $('fileName').textContent = name + (persisted ? ' · gardé sur cet appareil' : " · valable jusqu'à la fermeture de l'app");
+    if (armed) prime();
+  }
+  $('file').addEventListener('change', function () {
+    var f = $('file').files[0]; if (!f) return;
+    putFile(f).then(function () { useFile(f, f.name, true); }).catch(function () { useFile(f, f.name, false); });
+    state.sound = 'custom'; $('sound').value = 'custom'; save();
+  });
+  try {
+    getFile().then(function (rec) { if (rec && rec.blob) useFile(rec.blob, rec.name, true); }).catch(function () { /* none */ });
+  } catch (e) { /* no indexedDB */ }
+
+  /* adhan.mp3 posé à côté de index.html : proposé comme son de l'app */
+  try {
+    fetch('adhan.mp3', { method: 'HEAD' }).then(function (r) {
+      var ct = r.headers.get('content-type') || '';
+      if (!r.ok || ct.indexOf('audio') !== 0) return;
+      var o = document.createElement('option'); o.value = 'bundled'; o.textContent = "Adhan de l'app (adhan.mp3)";
+      $('sound').insertBefore(o, $('sound').children[1]);
+      $('sound').value = state.sound;
+      if (state.sound === 'bundled') { audioEl = new Audio('adhan.mp3'); audioEl.preload = 'auto'; audioEl.volume = state.volume; }
+    }).catch(function () { /* offline or absent */ });
+  } catch (e) { /* no fetch */ }
+  $('sound').addEventListener('change', function () {
+    if ($('sound').value === 'bundled') { audioEl = new Audio('adhan.mp3'); audioEl.preload = 'auto'; audioEl.volume = state.volume; if (armed) prime(); }
+  });
+
+  /* Écran allumé */
+  var lock = null;
+  function applyWake() {
+    if (!state.wake) { if (lock) { try { lock.release(); } catch (e) { /* ignore */ } lock = null; } return; }
+    try {
+      if (navigator.wakeLock && document.visibilityState === 'visible') {
+        navigator.wakeLock.request('screen').then(function (l) { lock = l; l.addEventListener('release', function () { lock = null; }); }).catch(function () { /* refused */ });
+      }
+    } catch (e) { /* unsupported */ }
+  }
+  $('wake').addEventListener('change', function () { state.wake = $('wake').checked; save(); applyWake(); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') { applyWake(); tick(); scheduleNext(); refreshGpsIfGranted(); }
+    else if (comp.on) { detachCompass(); }
+  });
+
+  /* ---------- Installation (PWA) ---------- */
+  var deferred = null;
+  var standalone = window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault(); deferred = e;
+    if (!standalone) { $('install').hidden = false; $('installText').textContent = "Ajoutez Adhan à l'écran d'accueil pour l'ouvrir comme une app, même sans connexion."; $('installBtn').hidden = false; }
+  });
+  $('installBtn').addEventListener('click', function () {
+    if (!deferred) return;
+    deferred.prompt(); deferred = null; $('install').hidden = true;
+  });
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !standalone) {
+    $('install').hidden = false;
+    $('installText').textContent = "Sur iPhone : touchez le bouton Partager de Safari, puis « Sur l'écran d'accueil ». Les notifications ne fonctionnent qu'une fois l'app ajoutée.";
+  }
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () { /* ignore */ }); });
+  }
+
+  /* ---------- Démarrage ---------- */
+  syncControls(); gpsLabel(); drawQibla(); drawHijri(); renderArm();
+  recompute();
+  setInterval(tick, 1000);
+  setInterval(drawHijri, 600000);
+  refreshGpsIfGranted();
+})();
+</script>
+</body>
+</html>
