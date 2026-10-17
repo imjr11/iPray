@@ -1,5 +1,5 @@
 /* Service worker d'Adhan : l'app s'ouvre sans connexion. Changez CACHE à chaque mise à jour des fichiers. */
-var CACHE = 'adhan-v1';
+var CACHE = 'adhan-v2';
 var CORE = [
   './',
   'index.html',

@@ -71,6 +71,7 @@ body {
 .hijri { color: var(--muted); font-size: 13px; }
 .msg { color: var(--muted); font-size: 13px; min-height: 1.2em; }
 .msg.err { color: var(--danger); }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
 
 select, input[type="number"], input[type="text"] {
   font: inherit; color: var(--fg); background-color: var(--bg);
@@ -256,6 +257,25 @@ input[type="file"] { max-width: 100%; font: inherit; font-size: 13px; color: var
     </div>
   </details>
 
+  <details id="pushBox">
+    <summary>Rappels téléphone verrouillé (ntfy)</summary>
+    <div class="panel">
+      <div class="hint">Une page web ne peut pas sonner quand le téléphone est verrouillé. Adhan programme donc vos rappels auprès du service gratuit ntfy, qui les envoie à l'heure de chaque prière, app fermée.</div>
+      <ol class="steps">
+        <li>Installez l'app gratuite <strong>ntfy</strong> (App Store ou Google Play).</li>
+        <li>Dans ntfy, touchez « + » et saisissez le nom du sujet ci-dessous.</li>
+        <li>Cochez la case, puis touchez « Envoyer un test ».</li>
+      </ol>
+      <div class="field">
+        <label for="pushTopic">Nom du sujet à saisir dans ntfy (gardez-le privé)</label>
+        <div class="row"><input id="pushTopic" class="mono" type="text" readonly style="flex:1"><button class="btn quiet" id="pushCopy" type="button">Copier</button></div>
+      </div>
+      <label class="row" style="gap:8px"><input id="push" type="checkbox"> <span class="lab">Programmer les rappels de prière</span></label>
+      <div class="row"><button class="btn quiet" id="pushTest" type="button">Envoyer un test</button></div>
+      <div class="msg" id="pushMsg" role="status"></div>
+    </div>
+  </details>
+
   <details>
     <summary>Son et notifications</summary>
     <div class="panel">
@@ -275,7 +295,7 @@ input[type="file"] { max-width: 100%; font: inherit; font-size: 13px; color: var
         <label class="lab" for="vol">Volume</label>
         <input id="vol" type="range" min="0.1" max="1" step="0.05">
       </div>
-      <label class="row" style="gap:8px"><input id="notify" type="checkbox"> <span class="lab">Notification à l'heure de la prière</span></label>
+      <label class="row" style="gap:8px"><input id="notify" type="checkbox"> <span class="lab">Notification quand l'app est ouverte en arrière-plan</span></label>
       <label class="row" style="gap:8px"><input id="wake" type="checkbox"> <span class="lab">Garder l'écran allumé</span></label>
       <div class="row"><button class="btn quiet" id="test" type="button">Tester l'appel</button></div>
     </div>
@@ -429,11 +449,12 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
   ];
 
   var DEFAULTS = {
-    city: 'Paris', lat: 48.8566, lng: 2.3522, tz: 'Europe/Paris', gpsAt: 0,
+    city: 'Paris', lat: 48.8566, lng: 2.3522, tz: 'Europe/Paris', gpsAt: 0, auto: true,
     method: 'uoif', asr: 1,
     offsets: { fajr: 0, sunrise: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0 },
     calls: { fajr: true, dhuhr: true, asr: true, maghrib: true, isha: true },
-    sound: 'chime', volume: 0.8, wake: false, notify: false
+    sound: 'chime', volume: 0.8, wake: false, notify: false,
+    compass: true, pushOn: false, pushTopic: '', pushed: {}
   };
   var KEY = 'adhan-app-v2';
   var state = JSON.parse(JSON.stringify(DEFAULTS));
@@ -449,6 +470,8 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
 
   function validTz(tz) { try { new Intl.DateTimeFormat('fr-FR', { timeZone: tz }); return true; } catch (e) { return false; } }
   if (!validTz(state.tz)) state.tz = 'Europe/Paris';
+  if (state.auto) state.city = '__gps';
+  if (!state.pushed || typeof state.pushed !== 'object') state.pushed = {};
   function deviceTz() { try { var z = Intl.DateTimeFormat().resolvedOptions().timeZone; return z && validTz(z) ? z : null; } catch (e) { return null; } }
 
   /* ---------- Dates dans le fuseau choisi ---------- */
@@ -505,7 +528,8 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
 
   cityEl.addEventListener('change', function () {
     var v = cityEl.value;
-    if (v === '__gps') { locate(); cityEl.value = state.city; return; }
+    if (v === '__gps') { state.auto = true; state.city = '__gps'; syncControls(); gpsLabel(); locate(false); save(); return; }
+    state.auto = false;
     if (v === '__custom') {
       state.city = '__custom'; var z = deviceTz(); if (z) state.tz = z;
     } else {
@@ -544,9 +568,9 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     if (!silent) setLocMsg('Recherche de votre position…', false);
     navigator.geolocation.getCurrentPosition(function (pos) {
       locating = false;
-      state.city = '__gps';
-      state.lat = Math.round(pos.coords.latitude * 10000) / 10000;
-      state.lng = Math.round(pos.coords.longitude * 10000) / 10000;
+      state.city = '__gps'; state.auto = true;
+      state.lat = Math.round(pos.coords.latitude * 1000) / 1000;
+      state.lng = Math.round(pos.coords.longitude * 1000) / 1000;
       var z = deviceTz(); if (z) state.tz = z;
       state.gpsAt = Date.now();
       onLocationChange();
@@ -555,19 +579,20 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
       var m = err.code === 1 ? "Localisation refusée. Autorisez-la pour ce site dans les réglages du navigateur, puis réessayez."
         : err.code === 3 ? 'La position a pris trop de temps. Réessayez à l\'extérieur ou avec le Wi-Fi activé.'
         : 'Position introuvable. Choisissez une ville dans la liste.';
-      if (!silent || err.code === 1) setLocMsg(m, true);
+      if (!silent || err.code === 1 || !state.gpsAt) setLocMsg(m, true);
     }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 });
   }
   $('locate').addEventListener('click', function () { locate(false); });
   function gpsLabel() {
     if (state.city !== '__gps') return;
-    var t = new Intl.DateTimeFormat('fr-FR', { timeZone: state.tz, hour: '2-digit', minute: '2-digit' }).format(new Date(state.gpsAt || Date.now()));
+    if (!state.gpsAt) { setLocMsg('Recherche de votre position… En attendant, les horaires sont ceux de Paris.', false); return; }
+    var t = new Intl.DateTimeFormat('fr-FR', { timeZone: state.tz, hour: '2-digit', minute: '2-digit' }).format(new Date(state.gpsAt));
     setLocMsg('Position GPS relevée à ' + t + ' · ' + state.lat.toFixed(2) + '°, ' + state.lng.toFixed(2) + '°', false);
   }
   function refreshGpsIfGranted() {
-    if (state.city !== '__gps' || !navigator.permissions || !navigator.permissions.query) return;
-    if (Date.now() - (state.gpsAt || 0) < 30 * 60000) return;
-    navigator.permissions.query({ name: 'geolocation' }).then(function (r) { if (r.state === 'granted') locate(true); }).catch(function () { /* unsupported */ });
+    if (!state.auto) return;
+    if (Date.now() - (state.gpsAt || 0) < 120000) return;
+    locate(true);
   }
 
   /* ---------- Calcul du jour et affichage ---------- */
@@ -581,6 +606,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     today = dayEvents(p); tomorrow = dayEvents(addDay(p, 1));
     renderList(); drawArcStatic(); lastNextId = ''; tick();
     scheduleNext();
+    schedulePushSoon();
   }
 
   var bellSvg = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7"/><path d="M10 20a2 2 0 0 0 4 0"/><path class="slash" d="M4 4l16 16"/></svg>';
@@ -752,6 +778,8 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     queueRender();
   }
   function attachCompass() {
+    if (comp.on) return;
+    disarmTap();
     window.addEventListener(oriName, onOri, true);
     comp.on = true; comp.heading = null; comp.seen = false;
     $('compassBtn').textContent = 'Arrêter la boussole';
@@ -771,19 +799,35 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     $('qTxt').textContent = '';
     renderCompass();
   }
-  $('compassBtn').addEventListener('click', function () {
-    if (comp.on) { detachCompass(); return; }
+  /* La boussole repart toute seule. Sur iPhone, Apple impose un toucher par lancement : n'importe où sur l'écran suffit. */
+  var tapArmed = false;
+  function askCompass(fromTap) {
     var D = window.DeviceOrientationEvent;
-    if (D && typeof D.requestPermission === 'function') {
+    if (!D) { $('qStatus').textContent = 'Boussole indisponible sur cet appareil.'; return; }
+    if (typeof D.requestPermission === 'function') {
       D.requestPermission().then(function (r) {
-        if (r === 'granted') attachCompass();
-        else { $('qStatus').textContent = 'Accès à la boussole refusé.'; $('qTxt').textContent = 'Autorisez « Mouvement et orientation » pour ce site dans les réglages de Safari.'; }
-      }).catch(function () { $('qStatus').textContent = "Impossible d'activer la boussole."; });
-    } else if (window.DeviceOrientationEvent) {
-      attachCompass();
-    } else {
-      $('qStatus').textContent = 'Boussole indisponible sur cet appareil.';
-    }
+        if (r === 'granted') { state.compass = true; save(); attachCompass(); }
+        else { disarmTap(); $('qStatus').textContent = 'Accès à la boussole refusé.'; $('qTxt').textContent = 'Autorisez « Mouvement et orientation » pour ce site dans les réglages de Safari.'; }
+      }).catch(function () {
+        if (fromTap) { disarmTap(); $('qStatus').textContent = "Impossible d'activer la boussole."; } else { armTap(); }
+      });
+    } else { state.compass = true; save(); attachCompass(); }
+  }
+  function onTap(e) {
+    if (e.target && e.target.closest && e.target.closest('#compassBtn')) return;
+    askCompass(true);
+  }
+  function armTap() {
+    if (tapArmed) return;
+    tapArmed = true;
+    document.addEventListener('click', onTap, true);
+    if (!comp.on) $('qStatus').textContent = "Touchez l'écran pour activer la boussole";
+  }
+  function disarmTap() { tapArmed = false; document.removeEventListener('click', onTap, true); }
+  function autoCompass() { if (state.compass && !comp.on) askCompass(false); }
+  $('compassBtn').addEventListener('click', function () {
+    if (comp.on) { state.compass = false; save(); detachCompass(); return; }
+    askCompass(true);
   });
 
   /* ---------- Date hégirienne ---------- */
@@ -953,9 +997,93 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
   }
   $('wake').addEventListener('change', function () { state.wake = $('wake').checked; save(); applyWake(); });
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible') { applyWake(); tick(); scheduleNext(); refreshGpsIfGranted(); }
+    if (document.visibilityState === 'visible') { applyWake(); tick(); scheduleNext(); refreshGpsIfGranted(); autoCompass(); schedulePushSoon(); }
     else if (comp.on) { detachCompass(); }
   });
+
+  /* ---------- Rappels programmés (ntfy) ---------- */
+  var NTFY = 'https://ntfy.sh/';
+  var pushTimer = null, pushBusy = false;
+  function setPushMsg(t, err) { var m = $('pushMsg'); m.textContent = t; m.classList.toggle('err', !!err); }
+  function newTopic() {
+    var a = new Uint8Array(10);
+    (window.crypto || self.crypto).getRandomValues(a);
+    return 'adhan-' + Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+  function postPush(job) {
+    return fetch(NTFY + encodeURIComponent(state.pushTopic), {
+      method: 'POST',
+      headers: { 'X-Title': job.pr.fr + ' ' + fmtTime(job.ms), 'X-At': String(Math.round(job.ms / 1000)), 'X-Priority': 'high', 'X-Tags': 'mosque' },
+      body: job.pr.ar + " · C'est l'heure de la prière."
+    }).then(function (r) { if (!r.ok) throw new Error('ntfy ' + r.status); });
+  }
+  function pushStatus() {
+    var n = 0, last = 0, now = Date.now();
+    Object.keys(state.pushed).forEach(function (k) { if (state.pushed[k] > now) { n++; if (state.pushed[k] > last) last = state.pushed[k]; } });
+    if (!n) { setPushMsg('Aucun rappel programmé pour le moment.', false); return; }
+    var until = new Intl.DateTimeFormat('fr-FR', { timeZone: state.tz, weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(last));
+    setPushMsg(n + " rappels programmés, jusqu'au " + until + '. Ouvrez Adhan au moins une fois tous les 2 jours.', false);
+  }
+  function schedulePushSoon() {
+    clearTimeout(pushTimer);
+    if (!state.pushOn) return;
+    pushTimer = setTimeout(schedulePush, 4000);
+  }
+  function schedulePush() {
+    if (!state.pushOn || !state.pushTopic || pushBusy || !window.fetch) return;
+    var now = Date.now(), p = partsAt(now), jobs = [];
+    [p, addDay(p, 1), addDay(p, 2)].forEach(function (dp) {
+      dayEvents(dp).forEach(function (e) {
+        var pr = BYID[e.id];
+        if (pr.info || !state.calls[e.id]) return;
+        var ahead = e.ms - now;
+        if (ahead < 30000 || ahead > 2.95 * 86400000) return;
+        var key = dp.y + '-' + dp.m + '-' + dp.d + '-' + e.id;
+        var prev = state.pushed[key];
+        if (prev && Math.abs(prev - e.ms) <= 90000) return;
+        jobs.push({ key: key, ms: e.ms, pr: pr });
+      });
+    });
+    Object.keys(state.pushed).forEach(function (k) { if (state.pushed[k] < now - 86400000) delete state.pushed[k]; });
+    if (!jobs.length) { pushStatus(); return; }
+    pushBusy = true;
+    var next = function () {
+      var j = jobs.shift();
+      if (!j) { pushBusy = false; save(); pushStatus(); return; }
+      postPush(j).then(function () { state.pushed[j.key] = j.ms; next(); }).catch(function () {
+        pushBusy = false; save();
+        setPushMsg("Envoi impossible pour le moment. Vérifiez la connexion, Adhan réessaiera à la prochaine ouverture.", true);
+      });
+    };
+    next();
+  }
+  function initPushUi() {
+    if (!state.pushTopic) { state.pushTopic = newTopic(); save(); }
+    $('pushTopic').value = state.pushTopic;
+    $('push').checked = !!state.pushOn;
+    if (state.pushOn) pushStatus();
+    $('push').addEventListener('change', function () {
+      state.pushOn = $('push').checked; save();
+      if (state.pushOn) { setPushMsg('Programmation en cours…', false); schedulePush(); }
+      else setPushMsg('Rappels désactivés. Ceux déjà programmés sonneront une dernière fois.', false);
+    });
+    $('pushCopy').addEventListener('click', function () {
+      var b = $('pushCopy');
+      var ok = function () { b.textContent = 'Copié'; setTimeout(function () { b.textContent = 'Copier'; }, 1500); };
+      try { navigator.clipboard.writeText(state.pushTopic).then(ok, function () { $('pushTopic').select(); }); } catch (e) { $('pushTopic').select(); }
+    });
+    $('pushTest').addEventListener('click', function () {
+      setPushMsg('Envoi du test…', false);
+      fetch(NTFY + encodeURIComponent(state.pushTopic), {
+        method: 'POST',
+        headers: { 'X-Title': 'Test Adhan', 'X-Priority': 'high', 'X-Tags': 'mosque' },
+        body: 'Si vous voyez ce message, les rappels fonctionnent.'
+      }).then(function (r) {
+        if (!r.ok) throw new Error('ntfy ' + r.status);
+        setPushMsg('Test envoyé. Il doit arriver dans ntfy en quelques secondes. Sinon, vérifiez que le nom du sujet est identique dans ntfy.', false);
+      }).catch(function () { setPushMsg("Envoi impossible. Vérifiez votre connexion.", true); });
+    });
+  }
 
   /* ---------- Installation (PWA) ---------- */
   var deferred = null;
@@ -981,7 +1109,9 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
   recompute();
   setInterval(tick, 1000);
   setInterval(drawHijri, 600000);
+  initPushUi();
   refreshGpsIfGranted();
+  autoCompass();
 })();
 </script>
 </body>
