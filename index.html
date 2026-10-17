@@ -142,10 +142,14 @@ input[type="file"] { max-width: 100%; font: inherit; font-size: 13px; color: var
 .dial .n { fill: var(--muted); font-size: 13px; text-anchor: middle; font-weight: 600; font-family: var(--font-body); }
 .dial .n.north { fill: var(--danger); }
 .dial .qneedle { fill: var(--sun); }
-.dial .qbox { fill: var(--sun); }
+.dial .kaaba { fill: #14110a; stroke: var(--sun); stroke-width: 1.5; }
+.dial .kband { fill: var(--sun); }
+.dial .mecca { font-size: 10px; fill: var(--fg); }
 .dial .you { fill: var(--accent); }
 .dial.aligned .ring { stroke: var(--ok); stroke-width: 4; }
-.dial.aligned .qneedle, .dial.aligned .qbox { fill: var(--ok); }
+.dial.aligned .qneedle, .dial.aligned .kband { fill: var(--ok); }
+.dial.aligned .kaaba { stroke: var(--ok); }
+.q-mecca { font-size: 13px; color: var(--muted); }
 .q-deg { font-size: 28px; font-weight: 500; }
 .q-status { font-size: 15px; font-weight: 600; min-height: 1.5em; }
 .q-status.ok { color: var(--ok); }
@@ -226,14 +230,17 @@ input[type="file"] { max-width: 100%; font: inherit; font-size: 13px; color: var
         <text class="n" x="100" y="172">S</text>
         <text class="n" x="38" y="105">O</text>
         <g id="qMark">
-          <path class="qneedle" d="M100 52 L107 100 L93 100 Z"></path>
-          <rect class="qbox" x="92" y="12" width="16" height="16" rx="2"></rect>
+          <path class="qneedle" d="M100 56 L107 100 L93 100 Z"></path>
+          <rect class="kaaba" x="92" y="12" width="16" height="16" rx="2"></rect>
+          <rect class="kband" x="92" y="17" width="16" height="3"></rect>
+          <text class="n mecca" id="qLbl" x="100" y="48">La Mecque</text>
         </g>
       </g>
       <path class="you" d="M92 4 L108 4 L100 18 Z"></path>
       <circle cx="100" cy="100" r="4" fill="var(--fg)"></circle>
     </svg>
     <div class="q-deg mono" id="qDeg"></div>
+    <div class="q-mecca" id="qMecca"></div>
     <div class="q-status" id="qStatus" aria-live="polite"></div>
     <button class="btn quiet" id="compassBtn" type="button">Activer la boussole</button>
     <div class="q-txt" id="qTxt"></div>
@@ -279,6 +286,17 @@ input[type="file"] { max-width: 100%; font: inherit; font-size: 13px; color: var
   <details>
     <summary>Son et notifications</summary>
     <div class="panel">
+      <div class="field">
+        <label for="before">Rappel avant l'heure de la prière</label>
+        <select id="before">
+          <option value="0">Aucun rappel</option>
+          <option value="5">5 minutes avant</option>
+          <option value="10">10 minutes avant</option>
+          <option value="15">15 minutes avant</option>
+          <option value="20">20 minutes avant</option>
+          <option value="30">30 minutes avant</option>
+        </select>
+      </div>
       <div class="field">
         <label for="sound">Son de l'appel</label>
         <select id="sound">
@@ -454,7 +472,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     offsets: { fajr: 0, sunrise: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0 },
     calls: { fajr: true, dhuhr: true, asr: true, maghrib: true, isha: true },
     sound: 'chime', volume: 0.8, wake: false, notify: false,
-    compass: true, armed: true, pushOn: false, pushTopic: '', pushed: {}
+    compass: true, armed: true, before: 5, cityName: '', cityKey: '', pushOn: false, pushTopic: '', pushed: {}
   };
   var KEY = 'adhan-app-v2';
   var state = JSON.parse(JSON.stringify(DEFAULTS));
@@ -516,13 +534,14 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
   });
 
   function syncControls() {
+    og.textContent = state.cityName ? 'Ma position · ' + state.cityName : 'Ma position (GPS)';
     cityEl.value = state.city;
     if (cityEl.value !== state.city) cityEl.value = 'Paris';
     $('custom').hidden = state.city !== '__custom';
     $('lat').value = state.lat; $('lng').value = state.lng; $('tz').value = state.tz;
     methodEl.value = state.method; $('asr').value = String(state.asr);
     PRAYERS.forEach(function (p) { $('off-' + p.id).value = state.offsets[p.id] || 0; });
-    $('sound').value = state.sound; $('vol').value = state.volume;
+    $('sound').value = state.sound; $('vol').value = state.volume; $('before').value = String(state.before);
     $('wake').checked = !!state.wake; $('notify').checked = !!state.notify;
   }
 
@@ -557,9 +576,24 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
   });
   $('vol').addEventListener('input', function () { state.volume = +$('vol').value; if (audioEl) audioEl.volume = state.volume; save(); });
   $('sound').addEventListener('change', function () { state.sound = $('sound').value; save(); });
+  $('before').addEventListener('change', function () { state.before = parseInt($('before').value, 10) || 0; save(); schedulePushSoon(); });
 
   /* ---------- Position GPS ---------- */
   function setLocMsg(t, err) { var m = $('locMsg'); m.textContent = t; m.classList.toggle('err', !!err); }
+  /* Nom de la commune : coordonnées arrondies à 1 km envoyées à BigDataCloud, une fois par déplacement. */
+  function lookupCity() {
+    var key = state.lat.toFixed(2) + ',' + state.lng.toFixed(2);
+    if (state.cityKey === key && state.cityName) return;
+    if (state.cityKey !== key) { state.cityName = ''; state.cityKey = key; syncControls(); gpsLabel(); }
+    if (!window.fetch) return;
+    fetch('https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=fr&latitude=' + state.lat.toFixed(2) + '&longitude=' + state.lng.toFixed(2))
+      .then(function (r) { if (!r.ok) throw new Error('geo ' + r.status); return r.json(); })
+      .then(function (j) {
+        var n = (j && (j.city || j.locality || j.principalSubdivision)) || '';
+        if (!n || state.cityKey !== key) return;
+        state.cityName = n; save(); syncControls(); gpsLabel();
+      }).catch(function () { /* hors ligne : on garde les coordonnées */ });
+  }
   var locating = false;
   function locate(silent) {
     if (!navigator.geolocation) { setLocMsg("La géolocalisation n'est pas disponible sur cet appareil.", true); return; }
@@ -574,6 +608,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
       var z = deviceTz(); if (z) state.tz = z;
       state.gpsAt = Date.now();
       onLocationChange();
+      lookupCity();
     }, function (err) {
       locating = false;
       var m = err.code === 1 ? "Localisation refusée. Autorisez-la pour ce site dans les réglages du navigateur, puis réessayez."
@@ -587,7 +622,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     if (state.city !== '__gps') return;
     if (!state.gpsAt) { setLocMsg('Recherche de votre position… En attendant, les horaires sont ceux de Paris.', false); return; }
     var t = new Intl.DateTimeFormat('fr-FR', { timeZone: state.tz, hour: '2-digit', minute: '2-digit' }).format(new Date(state.gpsAt));
-    setLocMsg('Position GPS relevée à ' + t + ' · ' + state.lat.toFixed(2) + '°, ' + state.lng.toFixed(2) + '°', false);
+    setLocMsg((state.cityName ? state.cityName + ' · position' : 'Position') + ' GPS relevée à ' + t + ' · ' + state.lat.toFixed(2) + '°, ' + state.lng.toFixed(2) + '°', false);
   }
   function refreshGpsIfGranted() {
     if (!state.auto) return;
@@ -697,6 +732,10 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
         var pr = BYID[e.id];
         if (pr.info || !state.calls[e.id]) return;
         var key = dayKey + '-' + e.id;
+        var pre = (+state.before || 0) * 60000, pkey = key + '-pre';
+        if (pre && now >= e.ms - pre && now < e.ms && now < e.ms - pre + 180000 && !fired[pkey]) {
+          fired[pkey] = true; fireCall('Dans ' + state.before + ' min · ' + pr.fr + ' ' + fmtTime(e.ms), pr.ar, true);
+        }
         if (now >= e.ms && now - e.ms < 180000 && !fired[key]) {
           fired[key] = true; fireCall(pr.fr + ' · ' + fmtTime(e.ms), pr.ar);
         }
@@ -743,6 +782,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     var h = comp.heading;
     $('dialRot').setAttribute('transform', 'rotate(' + (h === null ? 0 : -h).toFixed(1) + ' 100 100)');
     $('qMark').setAttribute('transform', 'rotate(' + bearing.toFixed(1) + ' 100 100)');
+    $('qLbl').setAttribute('transform', 'rotate(' + (-(bearing - (h === null ? 0 : h))).toFixed(1) + ' 100 48)');
     var st = $('qStatus');
     if (h === null) {
       st.className = 'q-status';
@@ -762,6 +802,10 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     bearing = qiblaBearing(state.lat, state.lng);
     var names = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest'];
     $('qDeg').textContent = Math.round(bearing) + '° ' + names[Math.round(bearing / 45) % 8];
+    var dLa = (21.4225 - state.lat) * rad, dLo = (39.8262 - state.lng) * rad;
+    var hav = Math.pow(Math.sin(dLa / 2), 2) + Math.cos(state.lat * rad) * Math.cos(21.4225 * rad) * Math.pow(Math.sin(dLo / 2), 2);
+    var km = Math.round(2 * 6371 * Math.asin(Math.sqrt(hav)) / 10) * 10;
+    $('qMecca').textContent = 'La Mecque · 21,42° N, 39,83° E · à ' + new Intl.NumberFormat('fr-FR').format(km) + ' km';
     queueRender();
   }
 
@@ -852,12 +896,12 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     active = [];
     if (audioEl) { try { audioEl.pause(); audioEl.currentTime = 0; } catch (e) { /* ignore */ } }
   }
-  function playChime() {
+  function playChime(reps) {
     var c = getCtx(); if (!c) return;
     if (c.resume) c.resume();
     var master = c.createGain(); master.gain.value = state.volume * 0.45; master.connect(c.destination);
     var notes = [392, 494, 587, 784], t = c.currentTime + 0.05;
-    for (var r = 0; r < 3; r++) {
+    for (var r = 0; r < (reps || 3); r++) {
       notes.forEach(function (f) {
         [[f, 1], [f * 2.01, 0.25]].forEach(function (pair) {
           var o = c.createOscillator(), g = c.createGain();
@@ -872,8 +916,9 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
       t += 0.9;
     }
   }
-  function playSound() {
+  function playSound(soft) {
     stopSound();
+    if (soft) { playChime(1); return; }
     if (state.sound !== 'chime' && audioEl) {
       audioEl.volume = state.volume; audioEl.currentTime = 0;
       var pr = audioEl.play();
@@ -881,20 +926,20 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     } else { playChime(); }
   }
   var bannerTimer = null, baseTitle = document.title;
-  function notifyNow(label) {
+  function notifyNow(label, soft) {
     if (!state.notify || !('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
-    var opts = { body: "C'est l'heure de la prière.", icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'adhan', renotify: true, vibrate: [200, 100, 200] };
+    var opts = { body: soft ? 'La prière approche.' : "C'est l'heure de la prière.", icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'adhan', renotify: true, vibrate: [200, 100, 200] };
     try {
       if (navigator.serviceWorker && navigator.serviceWorker.ready) {
         navigator.serviceWorker.ready.then(function (r) { r.showNotification(label, opts); }).catch(function () { new Notification(label, opts); });
       } else { new Notification(label, opts); }
     } catch (e) { /* ignore */ }
   }
-  function fireCall(label, ar) {
+  function fireCall(label, ar, soft) {
     $('bannerText').textContent = (ar ? ar + ' · ' : '') + label;
     $('banner').hidden = false;
     try { document.title = label; } catch (e) { /* ignore */ }
-    playSound(); notifyNow(label);
+    playSound(soft); notifyNow(label, soft);
     clearTimeout(bannerTimer); bannerTimer = setTimeout(hideBanner, 5 * 60000);
   }
   function hideBanner() { $('banner').hidden = true; stopSound(); try { document.title = baseTitle; } catch (e) { /* ignore */ } }
@@ -1021,8 +1066,13 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
   function postPush(job) {
     return fetch(NTFY + encodeURIComponent(state.pushTopic), {
       method: 'POST',
-      headers: { 'X-Title': job.pr.fr + ' ' + fmtTime(job.ms), 'X-At': String(Math.round(job.ms / 1000)), 'X-Priority': 'high', 'X-Tags': 'mosque' },
-      body: job.pr.ar + " · C'est l'heure de la prière."
+      headers: {
+        'X-Title': job.pre ? 'Dans ' + job.pre + ' min : ' + job.pr.fr + ' ' + fmtTime(job.prayerMs) : job.pr.fr + ' ' + fmtTime(job.ms),
+        'X-At': String(Math.round(job.ms / 1000)),
+        'X-Priority': job.pre ? 'default' : 'high',
+        'X-Tags': 'mosque'
+      },
+      body: job.pr.ar + (job.pre ? ' · La prière approche.' : " · C'est l'heure de la prière.")
     }).then(function (r) { if (!r.ok) throw new Error('ntfy ' + r.status); });
   }
   function pushStatus() {
@@ -1030,7 +1080,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     Object.keys(state.pushed).forEach(function (k) { if (state.pushed[k] > now) { n++; if (state.pushed[k] > last) last = state.pushed[k]; } });
     if (!n) { setPushMsg('Aucun rappel programmé pour le moment.', false); return; }
     var until = new Intl.DateTimeFormat('fr-FR', { timeZone: state.tz, weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(last));
-    setPushMsg(n + " rappels programmés, jusqu'au " + until + '. Ouvrez Adhan au moins une fois tous les 2 jours.', false);
+    setPushMsg(n + " notifications programmées, jusqu'au " + until + '. Ouvrez Adhan au moins une fois tous les 2 jours.', false);
   }
   function schedulePushSoon() {
     clearTimeout(pushTimer);
@@ -1044,12 +1094,17 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
       dayEvents(dp).forEach(function (e) {
         var pr = BYID[e.id];
         if (pr.info || !state.calls[e.id]) return;
-        var ahead = e.ms - now;
-        if (ahead < 30000 || ahead > 2.95 * 86400000) return;
-        var key = dp.y + '-' + dp.m + '-' + dp.d + '-' + e.id;
-        var prev = state.pushed[key];
-        if (prev && Math.abs(prev - e.ms) <= 90000) return;
-        jobs.push({ key: key, ms: e.ms, pr: pr });
+        var base = dp.y + '-' + dp.m + '-' + dp.d + '-' + e.id;
+        var list = [{ key: base, ms: e.ms, pre: 0 }];
+        var pre = +state.before || 0;
+        if (pre) list.push({ key: base + '-pre', ms: e.ms - pre * 60000, pre: pre });
+        list.forEach(function (j) {
+          var ahead = j.ms - now;
+          if (ahead < 30000 || ahead > 2.95 * 86400000) return;
+          var prev = state.pushed[j.key];
+          if (prev && Math.abs(prev - j.ms) <= 90000) return;
+          jobs.push({ key: j.key, ms: j.ms, prayerMs: e.ms, pre: j.pre, pr: pr });
+        });
       });
     });
     Object.keys(state.pushed).forEach(function (k) { if (state.pushed[k] < now - 86400000) delete state.pushed[k]; });
