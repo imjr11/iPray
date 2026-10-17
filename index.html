@@ -454,7 +454,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     offsets: { fajr: 0, sunrise: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0 },
     calls: { fajr: true, dhuhr: true, asr: true, maghrib: true, isha: true },
     sound: 'chime', volume: 0.8, wake: false, notify: false,
-    compass: true, pushOn: false, pushTopic: '', pushed: {}
+    compass: true, armed: true, pushOn: false, pushTopic: '', pushed: {}
   };
   var KEY = 'adhan-app-v2';
   var state = JSON.parse(JSON.stringify(DEFAULTS));
@@ -737,7 +737,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     $('ticks').innerHTML = s;
   })();
 
-  var comp = { on: false, sx: 0, sy: 0, heading: null, aligned: false, raf: 0, seen: false };
+  var comp = { on: false, sx: 0, sy: 0, heading: null, aligned: false, raf: 0, seen: false, granted: false };
   function renderCompass() {
     comp.raf = 0;
     var h = comp.heading;
@@ -806,7 +806,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     if (!D) { $('qStatus').textContent = 'Boussole indisponible sur cet appareil.'; return; }
     if (typeof D.requestPermission === 'function') {
       D.requestPermission().then(function (r) {
-        if (r === 'granted') { state.compass = true; save(); attachCompass(); }
+        if (r === 'granted') { comp.granted = true; state.compass = true; save(); attachCompass(); }
         else { disarmTap(); $('qStatus').textContent = 'Accès à la boussole refusé.'; $('qTxt').textContent = 'Autorisez « Mouvement et orientation » pour ce site dans les réglages de Safari.'; }
       }).catch(function () {
         if (fromTap) { disarmTap(); $('qStatus').textContent = "Impossible d'activer la boussole."; } else { armTap(); }
@@ -824,7 +824,11 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     if (!comp.on) $('qStatus').textContent = "Touchez l'écran pour activer la boussole";
   }
   function disarmTap() { tapArmed = false; document.removeEventListener('click', onTap, true); }
-  function autoCompass() { if (state.compass && !comp.on) askCompass(false); }
+  function autoCompass() {
+    if (!state.compass || comp.on) return;
+    if (comp.granted) { attachCompass(); return; }
+    askCompass(false);
+  }
   $('compassBtn').addEventListener('click', function () {
     if (comp.on) { state.compass = false; save(); detachCompass(); return; }
     askCompass(true);
@@ -838,7 +842,7 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
   }
 
   /* ---------- Son, notifications ---------- */
-  var armed = false, ctx = null, active = [], audioEl = null, customUrl = null;
+  var armed = !!state.armed, ctx = null, active = [], audioEl = null, customUrl = null;
   function getCtx() {
     if (!ctx) { var C = window.AudioContext || window.webkitAudioContext; if (C) ctx = new C(); }
     return ctx;
@@ -910,13 +914,17 @@ function turnNeeded(bearing, heading) { return mod(bearing - heading + 540, 360)
     b.textContent = armed ? 'Appels activés · Désactiver' : 'Activer les appels';
     b.classList.toggle('on', armed);
     $('armHint').textContent = armed
-      ? 'Un appel retentira à chaque heure de prière dont la cloche est active. Gardez l\'app ouverte.'
+      ? "Les appels restent activés. Au lancement de l'app, touchez l'écran une fois pour débloquer le son. L'app doit rester ouverte pour sonner."
       : "Touchez ce bouton à chaque ouverture : le navigateur n'autorise le son qu'après un toucher.";
   }
   $('arm').addEventListener('click', function () {
-    armed = !armed; if (armed) prime(); else hideBanner();
+    armed = !armed; state.armed = armed; save();
+    if (armed) prime(); else hideBanner();
     renderArm(); scheduleNext();
   });
+  /* Le navigateur bloque le son tant qu'on n'a pas touché la page : le premier toucher le débloque. */
+  function primeOnTap() { document.removeEventListener('click', primeOnTap, true); if (armed) prime(); }
+  document.addEventListener('click', primeOnTap, true);
   $('test').addEventListener('click', function () { prime(); fireCall("Test de l'appel", 'أذان'); });
 
   $('notify').addEventListener('change', function () {
